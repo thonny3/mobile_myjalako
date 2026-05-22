@@ -6,6 +6,8 @@ import '../responsive.dart';
 import 'accounts_screen.dart';
 import 'budgets_screen.dart';
 import 'new_budget_screen.dart';
+import '../services/auth_service.dart';
+import '../services/dashboard_service.dart';
 import 'login_screen.dart';
 import 'objectifs_screen.dart';
 import 'profile_screen.dart';
@@ -52,9 +54,43 @@ class _HomeScreenState extends State<HomeScreen> {
   final _accountsKey = GlobalKey<AccountsScreenState>();
   int _sectionIndex = _sectionAccueil;
   bool _showBalance = true;
+  bool _dashboardLoading = true;
+  double _totalBalance = 0;
+  double _monthlyIncome = 0;
+  double _monthlyExpenses = 0;
   List<Map<String, dynamic>> _transactions = List<Map<String, dynamic>>.from(
     DemoData.demoTransactions.map((t) => Map<String, dynamic>.from(t)),
   );
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboardSummary();
+  }
+
+  Future<void> _loadDashboardSummary() async {
+    setState(() => _dashboardLoading = true);
+    try {
+      final summary = await DashboardService.getSummary();
+      if (!mounted) return;
+      setState(() {
+        _totalBalance = summary.totalBalance;
+        _monthlyIncome = summary.monthlyIncome;
+        _monthlyExpenses = summary.monthlyExpenses;
+        _dashboardLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _dashboardLoading = false);
+    }
+  }
+
+  void _goToSection(int section) {
+    setState(() => _sectionIndex = section);
+    if (section == _sectionAccueil) {
+      _loadDashboardSummary();
+    }
+  }
 
   int get _totalRevenues => _transactions
       .where((t) => (t['amount'] as int) > 0)
@@ -70,7 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _navigateFromDrawer(int index) {
     Navigator.of(context).pop();
-    setState(() => _sectionIndex = index);
+    _goToSection(index);
   }
 
   int _bottomNavSelectedIndex() {
@@ -100,7 +136,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _bottomNavProfil => _sectionProfil,
       _ => _sectionAccueil,
     };
-    setState(() => _sectionIndex = section);
+    _goToSection(section);
   }
 
   void _showPlusMenu() {
@@ -194,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
               bg: const Color(0xFFF5F7F4),
               onTap: () async {
                 Navigator.pop(context);
-                setState(() => _sectionIndex = _sectionComptes);
+                _goToSection(_sectionComptes);
                 await Future.delayed(Duration.zero);
                 if (!mounted) return;
                 _accountsKey.currentState?.openNewAccount();
@@ -287,8 +323,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(context).pop();
+              await AuthService.logout();
+              if (!context.mounted) return;
               Navigator.of(context).pushReplacement(
                 MaterialPageRoute(builder: (context) => const LoginScreen()),
               );
@@ -510,12 +548,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDashboardTab(double bottomNavPadding) {
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(
-        parent: BouncingScrollPhysics(),
-      ),
-      padding: EdgeInsets.only(bottom: bottomNavPadding),
-      child: Column(
+    return RefreshIndicator(
+      color: AppColors.accent,
+      onRefresh: _loadDashboardSummary,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: EdgeInsets.only(bottom: bottomNavPadding),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildGreenHeader(),
@@ -538,7 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  "Budget Mensuel",
+                  'Budget Mensuel',
                   style: TextStyle(
                     color: Color(0xFF1C2D11),
                     fontSize: _r.sectionTitleSize,
@@ -609,7 +650,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
+      ),
     );
+  }
+
+  String _dashboardAmountText(double value) {
+    if (_dashboardLoading) return '…';
+    if (!_showBalance) return '•••••• ${widget.currency}';
+    return '${DemoData.formatAmount(value)} ${widget.currency}';
   }
 
   Widget _buildPageHeader(String title, String subtitle) {
@@ -1269,17 +1317,24 @@ class _HomeScreenState extends State<HomeScreen> {
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
-            child: Text(
-              _showBalance
-                  ? "${DemoData.formatAmount(DemoData.totalBalance)} ${widget.currency}"
-                  : "•••••• ${widget.currency}",
-              style: TextStyle(
-                color: Color(0xFF1C2D11),
-                fontSize: _r.balanceAmountSize,
-                fontWeight: FontWeight.bold,
-                letterSpacing: -0.5,
-              ),
-            ),
+            child: _dashboardLoading
+                ? const SizedBox(
+                    height: 28,
+                    width: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: AppColors.accent,
+                    ),
+                  )
+                : Text(
+                    _dashboardAmountText(_totalBalance),
+                    style: TextStyle(
+                      color: Color(0xFF1C2D11),
+                      fontSize: _r.balanceAmountSize,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
           ),
           const SizedBox(height: 16),
           Divider(color: const Color(0xFF8E9A86).withOpacity(0.12), height: 1),
@@ -1302,9 +1357,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _showBalance
-                          ? "${DemoData.formatAmount(DemoData.revenues)} ${widget.currency}"
-                          : "•••••• ${widget.currency}",
+                      _dashboardAmountText(_monthlyIncome),
                       style: const TextStyle(
                         color: Color(0xFF1C2D11),
                         fontSize: 16,
@@ -1337,9 +1390,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _showBalance
-                            ? "${DemoData.formatAmount(DemoData.expenses)} ${widget.currency}"
-                            : "•••••• ${widget.currency}",
+                        _dashboardAmountText(_monthlyExpenses),
                         style: const TextStyle(
                           color: Color(0xFF1C2D11),
                           fontSize: 16,

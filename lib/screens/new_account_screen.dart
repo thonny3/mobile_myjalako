@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../app_colors.dart';
+import '../models/compte.dart';
 import '../responsive.dart';
+import '../services/auth_service.dart';
+import '../services/compte_service.dart';
+import '../utils/compte_ui.dart';
 
 class NewAccountScreen extends StatefulWidget {
   final String currency;
@@ -15,53 +19,10 @@ class NewAccountScreen extends StatefulWidget {
 class _NewAccountScreenState extends State<NewAccountScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _bankController = TextEditingController();
   final _balanceController = TextEditingController(text: '0');
 
   int _selectedPresetIndex = 0;
-
-  static const List<Map<String, dynamic>> _presets = [
-    {
-      'title': 'Courant',
-      'name': 'Compte courant',
-      'bank': 'BFV-SG',
-      'icon': Icons.account_balance_rounded,
-      'color': AppColors.accent,
-      'bg': Color(0xFFE8F5E9),
-    },
-    {
-      'title': 'Épargne',
-      'name': 'Épargne',
-      'bank': 'BNI Madagascar',
-      'icon': Icons.savings_outlined,
-      'color': Color(0xFF2E7D32),
-      'bg': Color(0xFFE8F5E9),
-    },
-    {
-      'title': 'Mobile',
-      'name': 'Mvola',
-      'bank': 'Mobile money',
-      'icon': Icons.phone_android_rounded,
-      'color': Color(0xFF1976D2),
-      'bg': Color(0xFFE3F2FD),
-    },
-    {
-      'title': 'Espèces',
-      'name': 'Espèces',
-      'bank': 'Portefeuille',
-      'icon': Icons.payments_outlined,
-      'color': Color(0xFFF57C00),
-      'bg': Color(0xFFFFECE0),
-    },
-    {
-      'title': 'Autre',
-      'name': '',
-      'bank': '',
-      'icon': Icons.account_balance_wallet_outlined,
-      'color': Color(0xFF607D8B),
-      'bg': Color(0xFFECEFF1),
-    },
-  ];
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -72,21 +33,20 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
   @override
   void dispose() {
     _nameController.dispose();
-    _bankController.dispose();
     _balanceController.dispose();
     super.dispose();
   }
 
+  CompteTypeStyle get _selectedPreset => CompteUi.presets[_selectedPresetIndex];
+
   void _applyPreset(int index) {
-    final preset = _presets[index];
+    final preset = CompteUi.presets[index];
     setState(() {
       _selectedPresetIndex = index;
-      if (preset['title'] == 'Autre') {
+      if (preset.type == 'autre') {
         _nameController.clear();
-        _bankController.clear();
       } else {
-        _nameController.text = preset['name'] as String;
-        _bankController.text = preset['bank'] as String;
+        _nameController.text = preset.defaultNom;
       }
     });
   }
@@ -126,35 +86,50 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
     );
   }
 
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFFD32F2F),
+        content: Text(message),
+      ),
+    );
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate() || _isSubmitting) return;
 
     final balanceText = _balanceController.text.trim();
-    final balance = balanceText.isEmpty
-        ? 0.0
-        : double.parse(balanceText);
-    final preset = _presets[_selectedPresetIndex];
+    final solde = balanceText.isEmpty ? 0.0 : double.parse(balanceText);
+    final preset = _selectedPreset;
 
-    Navigator.pop(context, {
-      'name': _nameController.text.trim(),
-      'bank': _bankController.text.trim(),
-      'balance': balance,
-      'icon': preset['icon'] as IconData,
-      'color': preset['color'] as Color,
-      'bg': preset['bg'] as Color,
-    });
+    setState(() => _isSubmitting = true);
+
+    try {
+      await CompteService.create(
+        nom: _nameController.text.trim(),
+        solde: solde,
+        type: preset.type,
+      );
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      _showError(e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSubmitting = false);
+      _showError('Erreur lors de la création : $e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final r = context.responsive;
-    final preset = _presets[_selectedPresetIndex];
+    final preset = _selectedPreset;
     final displayName = _nameController.text.isEmpty
         ? 'Mon compte'
         : _nameController.text;
-    final displayBank = _bankController.text.isEmpty
-        ? 'Établissement'
-        : _bankController.text;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9F8),
@@ -168,7 +143,7 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => Navigator.pop(context),
+          onPressed: _isSubmitting ? null : () => Navigator.pop(context),
         ),
       ),
       body: SingleChildScrollView(
@@ -184,19 +159,19 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFF8E9A86).withOpacity(0.08)),
+                  border: Border.all(color: const Color(0xFF8E9A86).withValues(alpha: 0.08)),
                 ),
                 child: Row(
                   children: [
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: preset['bg'] as Color,
+                        color: preset.background,
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        preset['icon'] as IconData,
-                        color: preset['color'] as Color,
+                        preset.icon,
+                        color: preset.color,
                         size: 28,
                       ),
                     ),
@@ -222,7 +197,7 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
                             ),
                           ),
                           Text(
-                            '$displayBank • ${widget.currency}',
+                            '${preset.label} • ${widget.currency}',
                             style: const TextStyle(
                               color: Color(0xFF7F8E75),
                               fontSize: 12,
@@ -248,13 +223,13 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
                 height: 88,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
-                  itemCount: _presets.length,
+                  itemCount: CompteUi.presets.length,
                   separatorBuilder: (_, __) => const SizedBox(width: 10),
                   itemBuilder: (context, index) {
-                    final p = _presets[index];
+                    final p = CompteUi.presets[index];
                     final selected = _selectedPresetIndex == index;
                     return GestureDetector(
-                      onTap: () => _applyPreset(index),
+                      onTap: _isSubmitting ? null : () => _applyPreset(index),
                       child: Container(
                         width: 72,
                         padding: const EdgeInsets.symmetric(vertical: 10),
@@ -264,21 +239,17 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
                           border: Border.all(
                             color: selected
                                 ? AppColors.accent
-                                : const Color(0xFF8E9A86).withOpacity(0.15),
+                                : const Color(0xFF8E9A86).withValues(alpha: 0.15),
                             width: selected ? 1.5 : 1,
                           ),
                         ),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
-                              p['icon'] as IconData,
-                              color: p['color'] as Color,
-                              size: 22,
-                            ),
+                            Icon(p.icon, color: p.color, size: 22),
                             const SizedBox(height: 6),
                             Text(
-                              p['title'] as String,
+                              p.label,
                               textAlign: TextAlign.center,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -307,6 +278,7 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _nameController,
+                enabled: !_isSubmitting,
                 onChanged: (_) => setState(() {}),
                 decoration: _fieldDecoration(
                   hint: 'Ex. Compte courant, Mvola…',
@@ -324,33 +296,6 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
               ),
               const SizedBox(height: 20),
               const Text(
-                'Banque ou établissement',
-                style: TextStyle(
-                  color: Color(0xFF1C2D11),
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _bankController,
-                onChanged: (_) => setState(() {}),
-                decoration: _fieldDecoration(
-                  hint: 'Ex. BFV-SG, BNI, Mvola…',
-                  icon: Icons.account_balance_outlined,
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) {
-                    return 'Indiquez la banque ou l\'établissement';
-                  }
-                  if (v.trim().length < 2) {
-                    return 'Au moins 2 caractères';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 20),
-              const Text(
                 'Solde initial',
                 style: TextStyle(
                   color: Color(0xFF1C2D11),
@@ -358,23 +303,21 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 4),
-              const Text(
-                'Montant actuellement disponible sur ce compte',
-                style: TextStyle(color: Color(0xFF7F8E75), fontSize: 12),
-              ),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _balanceController,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                enabled: !_isSubmitting,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[\d.]')),
+                ],
                 decoration: _fieldDecoration(
                   hint: '0 (${widget.currency})',
                   icon: Icons.account_balance_wallet_outlined,
                 ),
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return null;
-                  final n = int.tryParse(v.trim());
+                  final n = double.tryParse(v.trim().replaceAll(',', '.'));
                   if (n == null || n < 0) {
                     return 'Le solde doit être positif ou nul';
                   }
@@ -394,7 +337,7 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
                     SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Le compte apparaîtra dans votre liste et sera inclus dans le solde total.',
+                        'Le compte sera enregistré sur le serveur avec nom, solde et type.',
                         style: TextStyle(
                           color: Color(0xFF355E3D),
                           fontSize: 12,
@@ -407,7 +350,7 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
               ),
               const SizedBox(height: 28),
               ElevatedButton(
-                onPressed: _submit,
+                onPressed: _isSubmitting ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accent,
                   foregroundColor: Colors.white,
@@ -417,10 +360,19 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
                   ),
                   elevation: 0,
                 ),
-                child: const Text(
-                  'Créer le compte',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                child: _isSubmitting
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text(
+                        'Créer le compte',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
               ),
             ],
           ),

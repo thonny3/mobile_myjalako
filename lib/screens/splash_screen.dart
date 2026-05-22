@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../app_branding.dart';
 import '../app_colors.dart';
+import '../services/auth_service.dart';
+import '../services/auth_storage.dart';
+import 'home_screen.dart';
 import 'login_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -37,10 +40,37 @@ class _SplashScreenState extends State<SplashScreen>
     await Future.delayed(SplashScreen.displayDuration);
     if (!mounted) return;
 
+    Widget destination = const LoginScreen();
+
+    if (await AuthStorage.hasSession()) {
+      final token = await AuthStorage.getToken();
+      if (token != null && token.isNotEmpty) {
+        try {
+          final user = await AuthService.verifyToken(token);
+          destination = HomeScreen(
+            userName: user.displayName,
+            userEmail: user.email,
+            currency: user.devise,
+          );
+        } on AuthException {
+          await AuthStorage.clear();
+        } catch (_) {
+          final cached = await AuthStorage.getUser();
+          if (cached != null) {
+            destination = HomeScreen(
+              userName: cached.displayName,
+              userEmail: cached.email,
+              currency: cached.devise,
+            );
+          }
+        }
+      }
+    }
+
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            const LoginScreen(),
+        pageBuilder: (context, animation, secondaryAnimation) => destination,
         transitionDuration: const Duration(milliseconds: 500),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);

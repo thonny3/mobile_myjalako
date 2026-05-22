@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../app_branding.dart';
 import '../app_colors.dart';
+import '../models/auth_user.dart';
 import '../responsive.dart';
+import '../services/auth_service.dart';
 import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -87,15 +90,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     setState(() => _signUpStep = step.clamp(0, _signUpTotalSteps - 1));
   }
 
-  String get _fullName {
-    final prenom = _firstNameController.text.trim();
-    final nom = _lastNameController.text.trim();
-    if (prenom.isEmpty && nom.isEmpty) return '';
-    if (prenom.isEmpty) return nom;
-    if (nom.isEmpty) return prenom;
-    return '$prenom $nom';
-  }
-
   bool _validateSignUpStep(int step) {
     if (step == 1) return _selectedCurrency.isNotEmpty;
     return _formKey.currentState?.validate() ?? false;
@@ -118,35 +112,27 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
-  Future<void> _submitForm() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(seconds: 2));
-
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-
+  void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: AppColors.accent,
+        backgroundColor: const Color(0xFFD32F2F),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: Text(
-          _isSignUp ? 'Compte créé avec succès !' : 'Connexion réussie',
+          message,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
     );
+  }
 
+  void _navigateToHome(AuthUser user) {
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => HomeScreen(
-          userName: _fullName.isNotEmpty ? _fullName : 'Utilisateur démo',
-          userEmail: _emailController.text.trim().isNotEmpty
-              ? _emailController.text.trim()
-              : 'demo@myjalako.app',
-          currency: _selectedCurrency,
+          userName: user.displayName,
+          userEmail: user.email,
+          currency: user.devise,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
@@ -158,6 +144,64 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         },
       ),
     );
+  }
+
+  Future<void> _submitForm() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      final AuthSession session;
+      if (_isSignUp) {
+        session = await AuthService.register(
+          nom: _lastNameController.text.trim(),
+          prenom: _firstNameController.text.trim(),
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+          currency: _selectedCurrency,
+        );
+      } else {
+        session = await AuthService.login(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+        );
+      }
+
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.accent,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          content: Text(
+            _isSignUp ? 'Compte créé avec succès !' : 'Connexion réussie',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+      );
+
+      _navigateToHome(session.user);
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showErrorSnackBar(e.message);
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showErrorSnackBar(
+        'Le serveur met trop de temps à répondre (démarrage Render). '
+        'Attendez 1 minute puis réessayez.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showErrorSnackBar(
+        e is AuthException ? e.message : 'Erreur inattendue : $e',
+      );
+    }
   }
 
   void _showForgotPasswordDialog() {
@@ -197,13 +241,35 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
               child: const Text('Annuler', style: TextStyle(color: AppColors.mediumGray)),
             ),
             ElevatedButton(
-              onPressed: () {
-                if (dialogFormKey.currentState!.validate()) {
+              onPressed: () async {
+                if (!(dialogFormKey.currentState?.validate() ?? false)) return;
+                final email = emailResetController.text.trim();
+                try {
+                  await AuthService.forgotPassword(email: email);
+                  if (!context.mounted) return;
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
+                    const SnackBar(
                       backgroundColor: AppColors.accent,
-                      content: const Text('Lien de réinitialisation envoyé'),
+                      content: Text(
+                        'Si un compte existe, un e-mail de réinitialisation a été envoyé',
+                      ),
+                    ),
+                  );
+                } on AuthException catch (e) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: const Color(0xFFD32F2F),
+                      content: Text(e.message),
+                    ),
+                  );
+                } catch (_) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      backgroundColor: Color(0xFFD32F2F),
+                      content: Text('Serveur inaccessible. Réessayez plus tard.'),
                     ),
                   );
                 }
