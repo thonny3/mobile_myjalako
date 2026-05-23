@@ -35,6 +35,7 @@ class MyApp extends StatelessWidget {
           brightness: Brightness.light,
           primary: AppColors.accent,
           surface: AppColors.creamBackground,
+          background: AppColors.creamBackground,
         ),
         scaffoldBackgroundColor: AppColors.creamBackground,
       ),

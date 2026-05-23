@@ -1,59 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../app_colors.dart';
 import '../demo_data.dart';
+import '../models/compte.dart';
+import '../models/transfert.dart';
 import '../responsive.dart';
+import '../services/auth_service.dart';
+import '../services/compte_service.dart';
+import '../services/transfert_service.dart';
 
 class TransferScreen extends StatefulWidget {
   final String currency;
   final double bottomPadding;
+  final VoidCallback? onTransferComplete;
 
   const TransferScreen({
     super.key,
     required this.currency,
     this.bottomPadding = 0,
+    this.onTransferComplete,
   });
 
   @override
-  State<TransferScreen> createState() => _TransferScreenState();
+  State<TransferScreen> createState() => TransferScreenState();
 }
 
-class _TransferScreenState extends State<TransferScreen> {
+class TransferScreenState extends State<TransferScreen> {
+  void reload() => _loadData();
+
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
   final _labelController = TextEditingController();
 
-  late List<Map<String, dynamic>> _accounts;
-  int? _fromIndex;
-  int? _toIndex;
+  List<Compte> _comptes = [];
+  List<TransfertHistorique> _recentTransfers = [];
+  int? _fromCompteId;
+  int? _toCompteId;
 
-  final List<Map<String, dynamic>> _recentTransfers = [
-    {
-      'from': 'Compte courant',
-      'to': 'Mvola',
-      'amount': 250000,
-      'date': 'Hier, 09:15',
-      'label': 'Recharge mobile',
-    },
-    {
-      'from': 'Épargne',
-      'to': 'Compte courant',
-      'amount': 1500000,
-      'date': '12 mai, 16:40',
-      'label': 'Virement mensuel',
-    },
-  ];
+  bool _isLoading = true;
+  bool _isSubmitting = false;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _accounts = List<Map<String, dynamic>>.from(
-      DemoData.demoAccounts.map((a) => Map<String, dynamic>.from(a)),
-    );
-    if (_accounts.length >= 2) {
-      _fromIndex = 0;
-      _toIndex = 1;
-    }
+    _loadData();
   }
 
   @override
@@ -63,61 +55,134 @@ class _TransferScreenState extends State<TransferScreen> {
     super.dispose();
   }
 
+  Compte? _compteById(int? id) {
+    if (id == null) return null;
+    for (final c in _comptes) {
+      if (c.idCompte == id) return c;
+    }
+    return null;
+  }
+
+  void _initDefaultAccounts() {
+    if (_comptes.length < 2) {
+      _fromCompteId = _comptes.isNotEmpty ? _comptes.first.idCompte : null;
+      _toCompteId = null;
+      return;
+    }
+    _fromCompteId ??= _comptes[0].idCompte;
+    _toCompteId ??= _comptes[1].idCompte;
+    if (_fromCompteId == _toCompteId) {
+      _toCompteId = _comptes
+          .firstWhere((c) => c.idCompte != _fromCompteId,
+              orElse: () => _comptes[1])
+          .idCompte;
+    }
+  }
+
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final results = await Future.wait([
+        CompteService.getMyAccounts(),
+        TransfertService.getHistorique(),
+      ]);
+      if (!mounted) return;
+      final comptes = results[0] as List<Compte>;
+      final historique = results[1] as List<TransfertHistorique>;
+      setState(() {
+        _comptes = comptes;
+        _recentTransfers = historique;
+        _initDefaultAccounts();
+        _isLoading = false;
+      });
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = e.message;
+        _comptes = [];
+        _recentTransfers = [];
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Impossible de charger les donnees : $e';
+        _comptes = [];
+        _recentTransfers = [];
+      });
+    }
+  }
+
   String _formatAmount(num amount) => DemoData.formatAmount(amount);
 
   void _swapAccounts() {
-    if (_fromIndex == null || _toIndex == null) return;
+    if (_fromCompteId == null || _toCompteId == null) return;
     setState(() {
-      final tmp = _fromIndex;
-      _fromIndex = _toIndex;
-      _toIndex = tmp;
+      final tmp = _fromCompteId;
+      _fromCompteId = _toCompteId;
+      _toCompteId = tmp;
     });
   }
 
-  void _submitTransfer() {
+  Future<void> _submitTransfer() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_fromIndex == null || _toIndex == null) {
-      _showMessage('Sélectionnez les comptes source et destination.', isError: true);
+    if (_fromCompteId == null || _toCompteId == null) {
+      _showMessage('Selectionnez les comptes source et destination.',
+          isError: true);
       return;
     }
-    if (_fromIndex == _toIndex) {
-      _showMessage('Les comptes source et destination doivent être différents.', isError: true);
-      return;
-    }
-
-    final amount = int.parse(_amountController.text.trim());
-    final from = _accounts[_fromIndex!];
-    final to = _accounts[_toIndex!];
-    final fromBalance = from['balance'] as double;
-
-    if (amount > fromBalance) {
-      _showMessage('Solde insuffisant sur ${from['name']}.', isError: true);
+    if (_fromCompteId == _toCompteId) {
+      _showMessage('Les comptes source et destination doivent etre differents.',
+          isError: true);
       return;
     }
 
-    final now = TimeOfDay.now();
-    final label = _labelController.text.trim().isNotEmpty
-        ? _labelController.text.trim()
-        : 'Transfert';
+    final amount = double.parse(_amountController.text.trim());
+    final from = _compteById(_fromCompteId)!;
+    final to = _compteById(_toCompteId)!;
 
-    setState(() {
-      from['balance'] = fromBalance - amount;
-      to['balance'] = (to['balance'] as double) + amount;
-      _recentTransfers.insert(0, {
-        'from': from['name'] as String,
-        'to': to['name'] as String,
-        'amount': amount,
-        'date':
-            'Aujourd\'hui, ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
-        'label': label,
-      });
+    if (amount > from.solde) {
+      _showMessage('Solde insuffisant sur ${from.nom}.', isError: true);
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      await TransfertService.transferCompteToCompte(
+        idCompteSource: _fromCompteId!,
+        idCompteCible: _toCompteId!,
+        montant: amount,
+      );
+      if (!mounted) return;
+
+      final label = _labelController.text.trim().isNotEmpty
+          ? _labelController.text.trim()
+          : 'Transfert';
+
       _amountController.clear();
       _labelController.clear();
-    });
 
-    _showMessage(
-      '${_formatAmount(amount)} ${widget.currency} transférés vers ${to['name']}',
-    );
+      await _loadData();
+      widget.onTransferComplete?.call();
+
+      if (!mounted) return;
+      _showMessage(
+        '${_formatAmount(amount)} ${widget.currency} transferes vers ${to.nom} ($label)',
+      );
+    } on AuthException catch (e) {
+      if (!mounted) return;
+      _showMessage(e.message, isError: true);
+    } catch (e) {
+      if (!mounted) return;
+      _showMessage('Erreur : $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   void _showMessage(String message, {bool isError = false}) {
@@ -131,7 +196,10 @@ class _TransferScreenState extends State<TransferScreen> {
     );
   }
 
-  InputDecoration _fieldDecoration({required String hint, required IconData icon}) {
+  InputDecoration _fieldDecoration({
+    required String hint,
+    required IconData icon,
+  }) {
     return InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(color: Color(0xFF8E9A86), fontSize: 15),
@@ -163,50 +231,70 @@ class _TransferScreenState extends State<TransferScreen> {
     final r = context.responsive;
     final h = r.horizontalPadding;
 
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-      padding: EdgeInsets.only(bottom: widget.bottomPadding),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildHeader(r),
-          Transform.translate(
-            offset: const Offset(0, -24),
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: h),
-              child: _buildTransferForm(r, h),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: h),
-            child: Text(
-              'Transferts récents',
-              style: TextStyle(
-                color: const Color(0xFF1C2D11),
-                fontSize: r.sectionTitleSize,
-                fontWeight: FontWeight.bold,
+    return RefreshIndicator(
+      color: AppColors.accent,
+      onRefresh: _loadData,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        padding: EdgeInsets.only(bottom: widget.bottomPadding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildHeader(r),
+            Transform.translate(
+              offset: const Offset(0, -24),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: h),
+                child: _isLoading
+                    ? const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 48),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            color: AppColors.accent,
+                          ),
+                        ),
+                      )
+                    : _errorMessage != null
+                        ? _buildErrorCard(_errorMessage!)
+                        : _comptes.length < 2
+                            ? _buildNeedAccountsCard()
+                            : _buildTransferForm(r),
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          if (_recentTransfers.isEmpty)
+            const SizedBox(height: 24),
             Padding(
-              padding: EdgeInsets.symmetric(horizontal: h, vertical: 24),
-              child: Center(
-                child: Text(
-                  'Aucun transfert pour le moment.',
-                  style: TextStyle(
-                    color: const Color(0xFF8E9A86).withOpacity(0.8),
-                    fontSize: r.bodySize,
-                  ),
+              padding: EdgeInsets.symmetric(horizontal: h),
+              child: Text(
+                'Transferts recents',
+                style: TextStyle(
+                  color: const Color(0xFF1C2D11),
+                  fontSize: r.sectionTitleSize,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-            )
-          else
-            ..._recentTransfers.map((t) => _buildTransferTile(t, h)),
-          const SizedBox(height: 16),
-        ],
+            ),
+            const SizedBox(height: 12),
+            if (!_isLoading && _errorMessage == null)
+              if (_recentTransfers.isEmpty)
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: h, vertical: 24),
+                  child: Center(
+                    child: Text(
+                      'Aucun transfert pour le moment.',
+                      style: TextStyle(
+                        color: const Color(0xFF8E9A86).withValues(alpha: 0.8),
+                        fontSize: r.bodySize,
+                      ),
+                    ),
+                  ),
+                )
+              else
+                ..._recentTransfers.map((t) => _buildTransferTile(t, h)),
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
   }
@@ -235,7 +323,7 @@ class _TransferScreenState extends State<TransferScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Virez entre vos comptes en toute sécurité',
+            'Virez entre vos comptes en toute securite',
             style: TextStyle(color: Colors.white70, fontSize: r.sp(13)),
           ),
         ],
@@ -243,16 +331,77 @@ class _TransferScreenState extends State<TransferScreen> {
     );
   }
 
-  Widget _buildTransferForm(AppResponsive r, double hPad) {
+  Widget _buildErrorCard(String message) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFF8E9A86).withOpacity(0.08)),
+        border: Border.all(color: const Color(0xFF8E9A86).withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Color(0xFFD32F2F), fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          TextButton.icon(
+            onPressed: _loadData,
+            icon: const Icon(Icons.refresh_rounded, color: AppColors.accent),
+            label: const Text('Reessayer', style: TextStyle(color: AppColors.accent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNeedAccountsCard() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF8E9A86).withValues(alpha: 0.08)),
+      ),
+      child: const Column(
+        children: [
+          Icon(Icons.account_balance_wallet_outlined,
+              size: 48, color: AppColors.accent),
+          SizedBox(height: 12),
+          Text(
+            'Au moins 2 comptes requis',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFF1C2D11),
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          SizedBox(height: 6),
+          Text(
+            'Creez un second compte dans la section Comptes pour effectuer un transfert.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFF7F8E75), fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTransferForm(AppResponsive r) {
+    final from = _compteById(_fromCompteId);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF8E9A86).withValues(alpha: 0.08)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 16,
             offset: const Offset(0, 10),
           ),
@@ -265,9 +414,9 @@ class _TransferScreenState extends State<TransferScreen> {
           children: [
             _buildAccountDropdown(
               label: 'Compte source',
-              valueIndex: _fromIndex,
-              excludeIndex: _toIndex,
-              onChanged: (v) => setState(() => _fromIndex = v),
+              valueId: _fromCompteId,
+              excludeId: _toCompteId,
+              onChanged: (v) => setState(() => _fromCompteId = v),
             ),
             const SizedBox(height: 8),
             Center(
@@ -279,7 +428,11 @@ class _TransferScreenState extends State<TransferScreen> {
                   customBorder: const CircleBorder(),
                   child: const Padding(
                     padding: EdgeInsets.all(10),
-                    child: Icon(Icons.swap_vert_rounded, color: AppColors.accent, size: 24),
+                    child: Icon(
+                      Icons.swap_vert_rounded,
+                      color: AppColors.accent,
+                      size: 24,
+                    ),
                   ),
                 ),
               ),
@@ -287,14 +440,14 @@ class _TransferScreenState extends State<TransferScreen> {
             const SizedBox(height: 8),
             _buildAccountDropdown(
               label: 'Compte destination',
-              valueIndex: _toIndex,
-              excludeIndex: _fromIndex,
-              onChanged: (v) => setState(() => _toIndex = v),
+              valueId: _toCompteId,
+              excludeId: _fromCompteId,
+              onChanged: (v) => setState(() => _toCompteId = v),
             ),
-            if (_fromIndex != null) ...[
+            if (from != null) ...[
               const SizedBox(height: 12),
               Text(
-                'Solde disponible : ${_formatAmount(_accounts[_fromIndex!]['balance'] as double)} ${widget.currency}',
+                'Solde disponible : ${_formatAmount(from.solde)} ${widget.currency}',
                 style: TextStyle(
                   color: const Color(0xFF7F8E75),
                   fontSize: r.labelSize,
@@ -315,6 +468,7 @@ class _TransferScreenState extends State<TransferScreen> {
               controller: _amountController,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              enabled: !_isSubmitting,
               style: const TextStyle(
                 color: Color(0xFF1C2D11),
                 fontSize: 18,
@@ -333,7 +487,7 @@ class _TransferScreenState extends State<TransferScreen> {
             ),
             const SizedBox(height: 14),
             Text(
-              'Libellé (optionnel)',
+              'Libelle (optionnel)',
               style: TextStyle(
                 color: const Color(0xFF8E9A86),
                 fontSize: r.labelSize,
@@ -343,6 +497,7 @@ class _TransferScreenState extends State<TransferScreen> {
             const SizedBox(height: 8),
             TextFormField(
               controller: _labelController,
+              enabled: !_isSubmitting,
               style: const TextStyle(color: Color(0xFF1C2D11)),
               decoration: _fieldDecoration(
                 hint: 'ex: Recharge Mvola',
@@ -353,11 +508,20 @@ class _TransferScreenState extends State<TransferScreen> {
             SizedBox(
               height: 52,
               child: ElevatedButton.icon(
-                onPressed: _submitTransfer,
-                icon: const Icon(Icons.send_rounded, size: 20),
-                label: const Text(
-                  'Effectuer le transfert',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                onPressed: _isSubmitting ? null : _submitTransfer,
+                icon: _isSubmitting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.send_rounded, size: 20),
+                label: Text(
+                  _isSubmitting ? 'Transfert en cours…' : 'Effectuer le transfert',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accent,
@@ -377,8 +541,8 @@ class _TransferScreenState extends State<TransferScreen> {
 
   Widget _buildAccountDropdown({
     required String label,
-    required int? valueIndex,
-    required int? excludeIndex,
+    required int? valueId,
+    required int? excludeId,
     required ValueChanged<int?> onChanged,
   }) {
     return Column(
@@ -402,24 +566,26 @@ class _TransferScreenState extends State<TransferScreen> {
           child: DropdownButtonHideUnderline(
             child: DropdownButton<int>(
               isExpanded: true,
-              value: valueIndex,
-              hint: const Text('Choisir un compte', style: TextStyle(color: Color(0xFF8E9A86))),
-              items: List.generate(_accounts.length, (i) {
-                if (i == excludeIndex) return null;
-                final acc = _accounts[i];
+              value: valueId,
+              hint: const Text(
+                'Choisir un compte',
+                style: TextStyle(color: Color(0xFF8E9A86)),
+              ),
+              items: _comptes.where((c) => c.idCompte != excludeId).map((acc) {
+                final ui = acc.toUiMap();
                 return DropdownMenuItem(
-                  value: i,
+                  value: acc.idCompte,
                   child: Row(
                     children: [
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: acc['bg'] as Color,
+                          color: ui['bg'] as Color,
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
-                          acc['icon'] as IconData,
-                          color: acc['color'] as Color,
+                          ui['icon'] as IconData,
+                          color: ui['color'] as Color,
                           size: 18,
                         ),
                       ),
@@ -430,7 +596,7 @@ class _TransferScreenState extends State<TransferScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              acc['name'] as String,
+                              acc.nom,
                               style: const TextStyle(
                                 color: Color(0xFF1C2D11),
                                 fontWeight: FontWeight.bold,
@@ -438,7 +604,7 @@ class _TransferScreenState extends State<TransferScreen> {
                               ),
                             ),
                             Text(
-                              '${_formatAmount(acc['balance'] as double)} ${widget.currency}',
+                              '${_formatAmount(acc.solde)} ${widget.currency}',
                               style: const TextStyle(
                                 color: Color(0xFF8E9A86),
                                 fontSize: 12,
@@ -450,7 +616,7 @@ class _TransferScreenState extends State<TransferScreen> {
                     ],
                   ),
                 );
-              }).whereType<DropdownMenuItem<int>>().toList(),
+              }).toList(),
               onChanged: onChanged,
             ),
           ),
@@ -459,7 +625,7 @@ class _TransferScreenState extends State<TransferScreen> {
     );
   }
 
-  Widget _buildTransferTile(Map<String, dynamic> transfer, double hPad) {
+  Widget _buildTransferTile(TransfertHistorique transfer, double hPad) {
     return Padding(
       padding: EdgeInsets.only(left: hPad, right: hPad, bottom: 10),
       child: Container(
@@ -467,7 +633,7 @@ class _TransferScreenState extends State<TransferScreen> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFF8E9A86).withOpacity(0.08)),
+          border: Border.all(color: const Color(0xFF8E9A86).withValues(alpha: 0.08)),
         ),
         child: Row(
           children: [
@@ -477,7 +643,11 @@ class _TransferScreenState extends State<TransferScreen> {
                 color: Color(0xFFE8F5E9),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.swap_horiz_rounded, color: AppColors.accent, size: 22),
+              child: const Icon(
+                Icons.swap_horiz_rounded,
+                color: AppColors.accent,
+                size: 22,
+              ),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -485,7 +655,7 @@ class _TransferScreenState extends State<TransferScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    transfer['label'] as String,
+                    transfer.label,
                     style: const TextStyle(
                       color: Color(0xFF1C2D11),
                       fontWeight: FontWeight.bold,
@@ -494,21 +664,23 @@ class _TransferScreenState extends State<TransferScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${transfer['from']} → ${transfer['to']}',
+                    transfer.routeLabel,
                     style: const TextStyle(color: Color(0xFF8E9A86), fontSize: 12),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    transfer['date'] as String,
-                    style: const TextStyle(color: Color(0xFF7F8E75), fontSize: 11),
-                  ),
+                  if (transfer.dateLabel.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      transfer.dateLabel,
+                      style: const TextStyle(color: Color(0xFF7F8E75), fontSize: 11),
+                    ),
+                  ],
                 ],
               ),
             ),
             Text(
-              '- ${_formatAmount(transfer['amount'] as int)}',
+              '- ${_formatAmount(transfer.montant)}',
               style: const TextStyle(
                 color: Color(0xFF1C2D11),
                 fontWeight: FontWeight.bold,

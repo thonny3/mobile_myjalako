@@ -31,6 +31,21 @@ class CompteService {
     return _parseList(response.body);
   }
 
+  static Future<Compte> getById(int idCompte) async {
+    final response = await ApiClient.get('$_basePath/$idCompte');
+    if (response.statusCode != 200) {
+      throw AuthException(
+        ApiClient.extractErrorMessage(response),
+        statusCode: response.statusCode,
+      );
+    }
+    final body = jsonDecode(response.body);
+    if (body is! Map<String, dynamic>) {
+      throw const AuthException('Compte introuvable');
+    }
+    return Compte.fromJson(body);
+  }
+
   static Future<int> create({
     required String nom,
     required double solde,

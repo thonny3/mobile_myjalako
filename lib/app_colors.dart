@@ -5,7 +5,7 @@ class AppColors {
   AppColors._();
 
   // --- Maquette (hex exacts) ---
-  static const Color creamBackground = Color(0xFFFDFCF9);
+  static const Color creamBackground = Color(0xFFFCFBF7);
   static const Color mintSurface = Color(0xFFE8F5F1);
   static const Color darkText = Color(0xFF2D2D2D);
   static const Color mediumGray = Color(0xFF757575);

@@ -132,7 +132,7 @@ class _NewAccountScreenState extends State<NewAccountScreen> {
         : _nameController.text;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9F8),
+      backgroundColor: AppColors.creamBackground,
       appBar: AppBar(
         backgroundColor: AppColors.accent,
         foregroundColor: Colors.white,

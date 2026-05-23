@@ -5,6 +5,7 @@ import '../responsive.dart';
 import '../services/auth_service.dart';
 import '../services/compte_service.dart';
 import '../utils/compte_ui.dart';
+import 'account_detail_screen.dart';
 import 'new_account_screen.dart';
 
 class AccountsScreen extends StatefulWidget {
@@ -22,6 +23,7 @@ class AccountsScreen extends StatefulWidget {
 }
 
 class AccountsScreenState extends State<AccountsScreen> {
+  void reload() => _loadAccounts();
   void openNewAccount() => _openNewAccount();
 
   bool _showBalances = true;
@@ -120,22 +122,46 @@ class AccountsScreenState extends State<AccountsScreen> {
             Padding(
               padding: EdgeInsets.symmetric(horizontal: h),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const Text(
-                    'Mes comptes',
-                    style: TextStyle(
-                      color: Color(0xFF1C2D11),
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Mes comptes',
+                          style: TextStyle(
+                            color: Color(0xFF1C2D11),
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _isLoading ? '…' : '${_accounts.length} compte${_accounts.length > 1 ? 's' : ''}',
+                          style: const TextStyle(
+                            color: Color(0xFF8E9A86),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  Text(
-                    _isLoading ? '…' : '${_accounts.length} comptes',
-                    style: const TextStyle(
-                      color: Color(0xFF8E9A86),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
+                  Material(
+                    color: AppColors.accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      onTap: _isLoading ? null : _openNewAccount,
+                      borderRadius: BorderRadius.circular(14),
+                      child: const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Icon(
+                          Icons.add_rounded,
+                          color: AppColors.accent,
+                          size: 24,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -161,28 +187,7 @@ class AccountsScreenState extends State<AccountsScreen> {
               )
             else
               ..._accounts.map((a) => _buildAccountTile(a, h)),
-            const SizedBox(height: 16),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: h),
-              child: OutlinedButton.icon(
-                onPressed: _isLoading ? null : _openNewAccount,
-                icon: const Icon(Icons.add_rounded, color: AppColors.accent),
-                label: const Text(
-                  'Ajouter un compte',
-                  style: TextStyle(
-                    color: AppColors.accent,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: const BorderSide(color: AppColors.accent, width: 1.5),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                ),
-              ),
-            ),
+            const SizedBox(height: 8),
           ],
         ),
       ),
@@ -216,16 +221,36 @@ class AccountsScreenState extends State<AccountsScreen> {
 
   Widget _buildEmptyCard() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFF8E9A86).withValues(alpha: 0.1)),
       ),
-      child: const Text(
-        'Aucun compte pour le moment. Créez votre premier compte.',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: Color(0xFF7F8E75), fontSize: 13),
+      child: Column(
+        children: [
+          Icon(
+            Icons.account_balance_wallet_outlined,
+            size: 48,
+            color: AppColors.accent.withValues(alpha: 0.5),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Aucun compte pour le moment',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Color(0xFF1C2D11),
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Créez votre premier compte pour suivre vos soldes.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Color(0xFF7F8E75), fontSize: 13),
+          ),
+        ],
       ),
     );
   }
@@ -333,6 +358,28 @@ class AccountsScreenState extends State<AccountsScreen> {
     );
   }
 
+  Future<void> _openAccountDetail(Map<String, dynamic> account) async {
+    final rawId = account['id_compte'];
+    final id = rawId is int
+        ? rawId
+        : (rawId is num ? rawId.toInt() : int.tryParse('$rawId') ?? 0);
+    if (id <= 0) return;
+
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AccountDetailScreen(
+          idCompte: id,
+          currency: widget.currency,
+        ),
+      ),
+    );
+
+    if (changed == true && mounted) {
+      await _loadAccounts();
+    }
+  }
+
   Widget _buildAccountTile(Map<String, dynamic> account, double hPad) {
     final balance = account['balance'] as double;
     final type = account['type'] as String? ?? '';
@@ -342,7 +389,7 @@ class AccountsScreenState extends State<AccountsScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
-          onTap: () {},
+          onTap: () => _openAccountDetail(account),
           borderRadius: BorderRadius.circular(20),
           child: Container(
             padding: const EdgeInsets.all(16),

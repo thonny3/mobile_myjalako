@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../app_branding.dart';
 import '../app_colors.dart';
 import '../demo_data.dart';
 import '../responsive.dart';
 import 'accounts_screen.dart';
 import 'budgets_screen.dart';
-import 'new_budget_screen.dart';
+import 'revenus_screen.dart';
+import 'depenses_screen.dart';
+import '../models/budget.dart';
 import '../services/auth_service.dart';
+import '../services/budget_service.dart';
 import '../services/dashboard_service.dart';
 import 'login_screen.dart';
 import 'objectifs_screen.dart';
 import 'profile_screen.dart';
 import 'transactions_screen.dart';
+import '../services/transaction_service.dart';
 import 'transfer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -52,20 +57,47 @@ class _HomeScreenState extends State<HomeScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _transactionsKey = GlobalKey<TransactionsScreenState>();
   final _accountsKey = GlobalKey<AccountsScreenState>();
+  final _revenusKey = GlobalKey<RevenusScreenState>();
+  final _depensesKey = GlobalKey<DepensesScreenState>();
+  final _budgetsKey = GlobalKey<BudgetsScreenState>();
+  final _transfertKey = GlobalKey<TransferScreenState>();
   int _sectionIndex = _sectionAccueil;
   bool _showBalance = true;
   bool _dashboardLoading = true;
   double _totalBalance = 0;
   double _monthlyIncome = 0;
   double _monthlyExpenses = 0;
-  List<Map<String, dynamic>> _transactions = List<Map<String, dynamic>>.from(
-    DemoData.demoTransactions.map((t) => Map<String, dynamic>.from(t)),
-  );
+  List<Map<String, dynamic>> _transactions = [];
+  List<Budget> _homeBudgets = [];
 
   @override
   void initState() {
     super.initState();
     _loadDashboardSummary();
+    _loadTransactionsPreview();
+    _loadBudgetsPreview();
+  }
+
+  Future<void> _loadBudgetsPreview() async {
+    try {
+      final list = await BudgetService.getAll();
+      if (!mounted) return;
+      final now = DateTime.now();
+      final month = DateTime(now.year, now.month);
+      setState(() {
+        _homeBudgets = list.where((b) => b.isForMonth(month)).take(2).toList();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadTransactionsPreview() async {
+    try {
+      final list = await TransactionService.getAll();
+      if (!mounted) return;
+      setState(() {
+        _transactions = TransactionService.toUiList(list);
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadDashboardSummary() async {
@@ -89,16 +121,35 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _sectionIndex = section);
     if (section == _sectionAccueil) {
       _loadDashboardSummary();
+      _loadTransactionsPreview();
+      _loadBudgetsPreview();
+    } else if (section == _sectionTransactions) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _transactionsKey.currentState?.reload();
+      });
+    } else if (section == _sectionRevenus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _revenusKey.currentState?.reload();
+      });
+    } else if (section == _sectionDepenses) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _depensesKey.currentState?.reload();
+      });
+    } else if (section == _sectionBudget) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _budgetsKey.currentState?.reload();
+      });
+    } else if (section == _sectionTransfert) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _transfertKey.currentState?.reload();
+      });
     }
   }
 
-  int get _totalRevenues => _transactions
-      .where((t) => (t['amount'] as int) > 0)
-      .fold(0, (sum, t) => sum + (t['amount'] as int));
-
-  int get _totalExpenses => _transactions
-      .where((t) => (t['amount'] as int) < 0)
-      .fold(0, (sum, t) => sum + (t['amount'] as int).abs());
+  void _onTransferComplete() {
+    _loadDashboardSummary();
+    _accountsKey.currentState?.reload();
+  }
 
   void _openDrawer() {
     _scaffoldKey.currentState?.openDrawer();
@@ -126,6 +177,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onBottomNavTap(int navIndex) {
     if (navIndex == _bottomNavPlus) {
+      if (_sectionIndex == _sectionComptes) {
+        _accountsKey.currentState?.openNewAccount();
+        return;
+      }
+      if (_sectionIndex == _sectionRevenus) {
+        _revenusKey.currentState?.openNewRevenu();
+        return;
+      }
+      if (_sectionIndex == _sectionDepenses) {
+        _depensesKey.currentState?.openNewDepense();
+        return;
+      }
+      if (_sectionIndex == _sectionTransactions) {
+        _transactionsKey.currentState?.showAddMenu();
+        return;
+      }
+      if (_sectionIndex == _sectionBudget) {
+        _budgetsKey.currentState?.openNewBudget();
+        return;
+      }
       _showPlusMenu();
       return;
     }
@@ -194,6 +265,36 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 10),
             _buildPlusOption(
+              title: 'Revenu',
+              subtitle: 'Nouvelle entrée d\'argent',
+              icon: Icons.trending_up_rounded,
+              color: const Color(0xFF2E7D32),
+              bg: const Color(0xFFE8F5E9),
+              onTap: () async {
+                Navigator.pop(context);
+                _goToSection(_sectionRevenus);
+                await Future.delayed(Duration.zero);
+                if (!mounted) return;
+                _revenusKey.currentState?.openNewRevenu();
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildPlusOption(
+              title: 'Dépense',
+              subtitle: 'Nouvelle sortie d\'argent',
+              icon: Icons.trending_down_rounded,
+              color: const Color(0xFFD32F2F),
+              bg: const Color(0xFFFFEBEE),
+              onTap: () async {
+                Navigator.pop(context);
+                _goToSection(_sectionDepenses);
+                await Future.delayed(Duration.zero);
+                if (!mounted) return;
+                _depensesKey.currentState?.openNewDepense();
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildPlusOption(
               title: 'Transfert',
               subtitle: 'Entre vos comptes',
               icon: Icons.send_rounded,
@@ -201,7 +302,7 @@ class _HomeScreenState extends State<HomeScreen> {
               bg: const Color(0xFFE3F2FD),
               onTap: () {
                 Navigator.pop(context);
-                setState(() => _sectionIndex = _sectionTransfert);
+                _goToSection(_sectionTransfert);
               },
             ),
             const SizedBox(height: 10),
@@ -213,12 +314,10 @@ class _HomeScreenState extends State<HomeScreen> {
               bg: const Color(0xFFF3E5F5),
               onTap: () async {
                 Navigator.pop(context);
-                await Navigator.push<Map<String, dynamic>>(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => NewBudgetScreen(currency: widget.currency),
-                  ),
-                );
+                _goToSection(_sectionBudget);
+                await Future.delayed(Duration.zero);
+                if (!mounted) return;
+                _budgetsKey.currentState?.openNewBudget();
               },
             ),
             const SizedBox(height: 10),
@@ -351,39 +450,68 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final bottomNavPadding = _r.bottomNavHeight;
+    final topInset = MediaQuery.paddingOf(context).top;
+    final onDashboard = _sectionIndex == _sectionAccueil;
 
-    return Scaffold(
-      key: _scaffoldKey,
-      backgroundColor: const Color(0xFFF8F9F8),
-      drawer: _buildSidebar(),
-      body: SafeArea(
-        bottom: false,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: _r.maxContentWidth,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: onDashboard
+          ? SystemUiOverlayStyle.light.copyWith(
+              statusBarColor: AppColors.accent,
+              statusBarIconBrightness: Brightness.light,
+            )
+          : SystemUiOverlayStyle.dark.copyWith(
+              statusBarColor: AppColors.creamBackground,
             ),
-            child: IndexedStack(
-              index: _sectionIndex,
-              children: [
-                _buildDashboardTab(bottomNavPadding),
+      child: Scaffold(
+        key: _scaffoldKey,
+        backgroundColor: AppColors.creamBackground,
+        drawer: _buildSidebar(),
+        body: Stack(
+          children: [
+            if (onDashboard && topInset > 0)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: topInset,
+                child: const ColoredBox(color: AppColors.accent),
+              ),
+            SafeArea(
+              bottom: false,
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: _r.maxContentWidth,
+                  ),
+                  child: IndexedStack(
+                    index: _sectionIndex,
+                    children: [
+                      _buildDashboardTab(bottomNavPadding),
                 AccountsScreen(
                   key: _accountsKey,
                   currency: widget.currency,
                   bottomPadding: bottomNavPadding,
                 ),
-                _buildRevenusTab(bottomNavPadding),
-                _buildDepensesTab(bottomNavPadding),
+                RevenusScreen(
+                  key: _revenusKey,
+                  currency: widget.currency,
+                  bottomPadding: bottomNavPadding,
+                ),
+                DepensesScreen(
+                  key: _depensesKey,
+                  currency: widget.currency,
+                  bottomPadding: bottomNavPadding,
+                ),
                 TransactionsScreen(
                   key: _transactionsKey,
                   currency: widget.currency,
                   bottomPadding: bottomNavPadding,
-                  transactions: _transactions,
-                  onTransactionsChanged: (list) {
+                  onListChanged: (list) {
                     setState(() => _transactions = list);
                   },
                 ),
                 BudgetsScreen(
+                  key: _budgetsKey,
                   currency: widget.currency,
                   bottomPadding: bottomNavPadding,
                 ),
@@ -400,16 +528,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 _buildParametresTab(bottomNavPadding),
                 TransferScreen(
+                  key: _transfertKey,
                   currency: widget.currency,
                   bottomPadding: bottomNavPadding,
+                  onTransferComplete: _onTransferComplete,
                 ),
-                _buildComingSoonTab('Ajouter', Icons.add_circle_outline_rounded, bottomNavPadding),
-              ],
+                      _buildComingSoonTab('Ajouter', Icons.add_circle_outline_rounded, bottomNavPadding),
+                    ],
+                  ),
+                ),
+              ),
             ),
-          ),
+          ],
         ),
+        bottomNavigationBar: _buildBottomNavBar(),
       ),
-      bottomNavigationBar: _buildBottomNavBar(),
     );
   }
 
@@ -567,12 +700,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: _buildBalanceCard(),
             ),
           ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: _hPad),
-            child: _buildQuickActions(),
-          ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 16),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: _hPad),
             child: Row(
@@ -587,7 +715,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 InkWell(
-                  onTap: () {},
+                  onTap: () => _goToSection(_sectionBudget),
                   child: const Text(
                     "Détails",
                     style: TextStyle(
@@ -601,20 +729,27 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: _hPad),
-            child: _buildBudgetCard(),
-          ),
-          const SizedBox(height: 16),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: _hPad),
-            child: _buildBudgetCard(
-              title: 'Transport',
-              spent: DemoData.transportSpent,
-              limit: DemoData.transportLimit,
-              progress: DemoData.transportSpent / DemoData.transportLimit,
-            ),
-          ),
+          if (_homeBudgets.isEmpty)
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: _hPad),
+              child: _buildBudgetCard(),
+            )
+          else
+            ..._homeBudgets.map((b) {
+              return Padding(
+                padding: EdgeInsets.only(
+                  left: _hPad,
+                  right: _hPad,
+                  bottom: 16,
+                ),
+                child: _buildBudgetCard(
+                  title: b.categorie,
+                  spent: b.spent.round(),
+                  limit: b.limit.round(),
+                  progress: b.limit > 0 ? b.spent / b.limit : 0.0,
+                ),
+              );
+            }),
           const SizedBox(height: 28),
           Padding(
             padding: EdgeInsets.symmetric(horizontal: _hPad),
@@ -746,129 +881,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildRevenusTab(double bottomPadding) {
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-      padding: EdgeInsets.only(bottom: bottomPadding),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildPageHeader('Revenus', 'Suivez vos entrées d\'argent'),
-          Transform.translate(
-            offset: const Offset(0, -24),
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: _hPad),
-              child: _buildSummaryCard(
-                label: 'Total ce mois-ci',
-                amount: '${DemoData.formatAmount(_totalRevenues)} ${widget.currency}',
-                icon: Icons.trending_up_rounded,
-                iconColor: const Color(0xFF2E7D32),
-                iconBg: const Color(0xFFE8F5E9),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: _hPad),
-            child: _buildIncomeExpenseList(isIncome: true),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDepensesTab(double bottomPadding) {
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-      padding: EdgeInsets.only(bottom: bottomPadding),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildPageHeader('Dépenses', 'Contrôlez vos sorties d\'argent'),
-          Transform.translate(
-            offset: const Offset(0, -24),
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: _hPad),
-              child: _buildSummaryCard(
-                label: 'Total ce mois-ci',
-                amount: '${DemoData.formatAmount(_totalExpenses)} ${widget.currency}',
-                icon: Icons.trending_down_rounded,
-                iconColor: const Color(0xFFD32F2F),
-                iconBg: const Color(0xFFFFEBEE),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: _hPad),
-            child: _buildIncomeExpenseList(isIncome: false),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIncomeExpenseList({required bool isIncome}) {
-    final items = _transactions.where((tx) {
-      final amount = tx['amount'] as int;
-      return isIncome ? amount > 0 : amount < 0;
-    }).toList();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF8E9A86).withOpacity(0.08)),
-      ),
-      child: ListView.separated(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: items.length,
-        separatorBuilder: (_, __) => Divider(
-          color: const Color(0xFF8E9A86).withOpacity(0.08),
-          height: 1,
-          indent: 16,
-          endIndent: 16,
-        ),
-        itemBuilder: (context, index) {
-          final tx = items[index];
-          return ListTile(
-            leading: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: tx['bg'] as Color,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(tx['icon'] as IconData, color: tx['fg'] as Color, size: 20),
-            ),
-            title: Text(
-              tx['title'] as String,
-              style: const TextStyle(
-                color: Color(0xFF1C2D11),
-                fontWeight: FontWeight.bold,
-                fontSize: 14,
-              ),
-            ),
-            subtitle: Text(
-              tx['subtitle'] as String,
-              style: const TextStyle(color: Color(0xFF8E9A86), fontSize: 12),
-            ),
-            trailing: Text(
-              '${DemoData.formatSignedAmount(tx['amount'] as int)} ${widget.currency}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: isIncome ? const Color(0xFF2E7D32) : const Color(0xFF1C2D11),
-                fontWeight: FontWeight.bold,
-                fontSize: _r.sp(13),
-              ),
-            ),
-          );
-        },
       ),
     );
   }
@@ -1161,10 +1173,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildGreenHeader() {
-    final logoSize = _r.isSmallPhone ? 30.0 : 36.0;
+    final logoSize = _r.isSmallPhone ? 34.0 : 40.0;
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.fromLTRB(_hPad, 14, _hPad, 44),
+      padding: EdgeInsets.fromLTRB(_hPad, 18, _hPad, 52),
       decoration: const BoxDecoration(
         color: AppColors.accent,
         borderRadius: BorderRadius.only(
@@ -1405,70 +1417,6 @@ class _HomeScreenState extends State<HomeScreen> {
           )
         ],
       ),
-    );
-  }
-
-  Widget _buildQuickActions() {
-    final actionSize = _r.quickActionSize;
-    final actions = [
-      {'name': 'Envoyer', 'icon': Icons.north_east_rounded, 'section': _sectionTransfert},
-      {'name': 'Recevoir', 'icon': Icons.south_west_rounded, 'section': _sectionTransfert},
-      {'name': 'Ajouter', 'icon': Icons.add_rounded, 'section': null, 'plus': true},
-      {'name': 'Plus', 'icon': Icons.more_horiz_rounded, 'section': null},
-    ];
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: actions.map((act) {
-        final section = act['section'] as int?;
-        final openPlus = act['plus'] == true;
-        return Column(
-          children: [
-            InkWell(
-              onTap: () {
-                if (openPlus) {
-                  _showPlusMenu();
-                } else if (section != null) {
-                  setState(() => _sectionIndex = section);
-                } else {
-                  _openDrawer();
-                }
-              },
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                height: actionSize,
-                width: actionSize,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFF8E9A86).withOpacity(0.15)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.01),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    )
-                  ],
-                ),
-                child: Icon(
-                  act['icon'] as IconData,
-                  color: AppColors.accent,
-                  size: _r.isSmallPhone ? 20 : 22,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              act['name'] as String,
-              style: TextStyle(
-                color: Color(0xFF1C2D11),
-                fontSize: _r.labelSize,
-                fontWeight: FontWeight.w600,
-              ),
-            )
-          ],
-        );
-      }).toList(),
     );
   }
 

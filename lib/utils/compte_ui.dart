@@ -71,4 +71,10 @@ class CompteUi {
     }
     return type;
   }
+
+  static int presetIndexForType(String type) {
+    final style = styleForType(type);
+    final idx = presets.indexWhere((p) => p.type == style.type);
+    return idx >= 0 ? idx : presets.length - 1;
+  }
 }

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_colors.dart';
+
 /// Utilitaires responsive pour téléphones et tablettes.
 class AppResponsive {
   AppResponsive(this.context);
@@ -89,7 +91,7 @@ class ResponsiveBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final r = context.responsive;
     return ColoredBox(
-      color: backgroundColor ?? const Color(0xFFF8F9F8),
+      color: backgroundColor ?? AppColors.creamBackground,
       child: SafeArea(
         bottom: false,
         child: Center(
